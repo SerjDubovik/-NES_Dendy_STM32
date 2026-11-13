@@ -18,7 +18,7 @@
                 "-f", "interface/cmsis-dap.cfg",
                 "-c", "transport select swd",
                 "-f", "target/stm32f4x.cfg",
-                "-c", "program {${command:cmake.launchTargetPath}} verify reset exit"
+                "-c", "program {${command:cmake.buildDirectory}/STM32F407_NES_Dendy.elf} verify reset exit"
             ],
             "problemMatcher": []
         }

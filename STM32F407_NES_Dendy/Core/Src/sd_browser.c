@@ -2,6 +2,9 @@
 
 #include "fatfs.h"
 #include "ili9341.h"
+#ifndef LCD_PLAYBACK_DIAGNOSTICS
+#include "nes_game.h"
+#endif
 #include "usbd_cdc_if.h"
 #include "usart_ring.h"
 #include "w25q16.h"
@@ -583,6 +586,15 @@ static FRESULT report_free_space(uint32_t id)
 
 static FRESULT execute(Request *req)
 {
+#ifndef LCD_PLAYBACK_DIAGNOSTICS
+    if (equal(req->op, u"nesstat") && !req->fields) {
+        NesGameTiming timing = NesGame_GetTiming();
+        return transmit(snprintf(response, sizeof(response),
+            "{\"id\":%lu,\"nes\":\"%s\",\"fps_x10\":%lu,\"frame_ms_x10\":%lu,\"lcd_dma_errors\":%lu}\n",
+            (unsigned long)req->id, NesGame_Status(), (unsigned long)timing.fps_times_10,
+            (unsigned long)timing.frame_ms_times_10, (unsigned long)timing.dma_errors)) ? FR_OK : FR_TIMEOUT;
+    }
+#endif
     if (equal(req->op, u"nespad")) {
         if (reply_port != PORT_UART || req->fields != MASK) return FR_INVALID_PARAMETER;
         nes_pad = (uint8_t)req->mask;

@@ -8,23 +8,41 @@ internal sealed partial class BrowserForm : Form, IMessageFilter
     private readonly FolderHistory _cardHistory = new();
     private string _path => _cardHistory.Current ?? "/";
     private bool _busy;
+    private bool _scanningPorts;
     private bool _closeRequested;
     private CancellationTokenSource? _transfer;
 
     public BrowserForm()
     {
         InitializeComponent();
-        baudComboBox.SelectedItem = 115200;
+        LoadSettings();
+        if (!baudComboBox.Items.Contains(_settings.BaudRate)) _settings.BaudRate = 115200;
+        baudComboBox.SelectedItem = _settings.BaudRate;
+        baudComboBox.SelectedIndexChanged += (_, _) =>
+        {
+            if (baudComboBox.SelectedItem is not int baudRate) return;
+            _settings.BaudRate = baudRate;
+            SaveSettings();
+        };
         exitMenuItem.Click += (_, _) => Close();
-        mediumComboBox.SelectedIndex = 0;
+        mediumComboBox.SelectedIndex = _settings.UseFlash ? 1 : 0;
+        cardHeading.Text = _settings.UseFlash ? "W25Q16 STM32" : "SD-карта STM32";
         mediumComboBox.SelectedIndexChanged += async (_, _) =>
         {
-            cardHeading.Text = mediumComboBox.SelectedIndex == 1 ? "W25Q16 STM32" : "SD-карта STM32";
+            _settings.UseFlash = mediumComboBox.SelectedIndex == 1;
+            cardHeading.Text = _settings.UseFlash ? "W25Q16 STM32" : "SD-карта STM32";
+            SaveSettings();
             if (_client is not null) await RunAsync(MountSelectedAsync);
         };
 
         scanButton.Click += (_, _) => ScanPorts();
-        portsComboBox.SelectedIndexChanged += (_, _) => UpdateControls();
+        portsComboBox.SelectedIndexChanged += (_, _) =>
+        {
+            if (_scanningPorts) return;
+            _settings.Port = portsComboBox.SelectedItem as string;
+            SaveSettings();
+            UpdateControls();
+        };
         connectButton.Click += async (_, _) => await ToggleConnectionAsync();
         refreshButton.Click += async (_, _) => await NavigateAsync(_path);
         createButton.Click += async (_, _) => await CreateAsync(directory: false);
@@ -40,6 +58,8 @@ internal sealed partial class BrowserForm : Form, IMessageFilter
         InitializePcPane();
         InitializeDragAndDrop();
         InitializeNesTab();
+        Load += (_, _) => RestoreWindowLayout();
+        Shown += (_, _) => RestoreSplitter();
         filesListView.SelectedIndexChanged += (_, _) => UpdateControls();
         filesListView.MouseClick += async (_, e) =>
         {
@@ -56,6 +76,7 @@ internal sealed partial class BrowserForm : Form, IMessageFilter
                 e.Cancel = true;
                 return;
             }
+            SaveWindowLayout();
             Disconnect();
         };
 
@@ -92,13 +113,23 @@ internal sealed partial class BrowserForm : Form, IMessageFilter
 
     private void ScanPorts()
     {
-        string? previous = portsComboBox.SelectedItem as string;
         string[] names = SerialPort.GetPortNames().Order(StringComparer.OrdinalIgnoreCase).ToArray();
-        portsComboBox.Items.Clear();
-        portsComboBox.Items.AddRange(names);
-        if (previous is not null && portsComboBox.Items.Contains(previous)) portsComboBox.SelectedItem = previous;
-        else if (names.Length > 0) portsComboBox.SelectedIndex = 0;
-        statusLabel.Text = names.Length == 0 ? "COM-порты не найдены." : "Выберите COM-порт платы.";
+        _scanningPorts = true;
+        try
+        {
+            portsComboBox.Items.Clear();
+            portsComboBox.Items.AddRange(names);
+            portsComboBox.SelectedIndex = _settings.Port is { Length: > 0 } preferred
+                ? Array.FindIndex(names, name => StringComparer.OrdinalIgnoreCase.Equals(name, preferred))
+                : names.Length > 0 ? 0 : -1;
+        }
+        finally
+        {
+            _scanningPorts = false;
+        }
+        statusLabel.Text = portsComboBox.SelectedIndex < 0 && _settings.Port is { Length: > 0 } missing
+            ? $"Порт {missing} сейчас недоступен. Обновите список или выберите другой порт."
+            : names.Length == 0 ? "COM-порты не найдены." : "Выберите COM-порт платы.";
         UpdateControls();
     }
 
@@ -190,6 +221,11 @@ internal sealed partial class BrowserForm : Form, IMessageFilter
         }
 
         if (portsComboBox.SelectedItem is not string port || baudComboBox.SelectedItem is not int baudRate) return;
+        if (_settings.Port is null)
+        {
+            _settings.Port = port;
+            SaveSettings();
+        }
         await RunAsync(async () =>
         {
             _client = await Task.Run(() => CardClient.Open(port, baudRate));

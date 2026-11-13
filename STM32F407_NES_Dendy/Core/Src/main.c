@@ -26,9 +26,10 @@
 #include "ili9341.h"
 #ifdef LCD_PLAYBACK_DIAGNOSTICS
 #include "lcd_playback_diagnostics.h"
+#else
+#include "nes_game.h"
 #endif
 #include "sd_browser.h"
-#include "slideshow.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -112,6 +113,9 @@ int main(void)
   /* USER CODE BEGIN 2 */
   SD_Browser_Init();
   ILI9341_Init();
+#ifndef LCD_PLAYBACK_DIAGNOSTICS
+  NesGame_Init();
+#endif
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -125,7 +129,7 @@ int main(void)
 #ifdef LCD_PLAYBACK_DIAGNOSTICS
     LcdPlaybackDiagnostics_Poll();
 #else
-    Slideshow_Poll();
+    NesGame_Poll();
 #endif
   }
   /* USER CODE END 3 */
@@ -428,10 +432,10 @@ static void MX_FSMC_Init(void)
   Timing.CLKDivision = 16;
   Timing.DataLatency = 17;
   Timing.AccessMode = FSMC_ACCESS_MODE_A;
-  /* Separate short write cycles from the slower ID reads. */
+  /* Leave settling time for WR and the parallel LCD cable at 168 MHz. */
   WriteTiming = Timing;
-  WriteTiming.AddressSetupTime = 4;
-  WriteTiming.DataSetupTime = 8;
+  WriteTiming.AddressSetupTime = 7;
+  WriteTiming.DataSetupTime = 11;
   WriteTiming.BusTurnAroundDuration = 0;
 
   if (HAL_SRAM_Init(&hsram1, &Timing, &WriteTiming) != HAL_OK)

@@ -11,8 +11,9 @@ _Min_Stack_Size = 0x2000 ; /* required amount of stack */
 /* Memories definition */
 MEMORY
 {
-  CCMRAM    (xrw)    : ORIGIN = 0x10000000,   LENGTH = 64K
-  RAM    (xrw)    : ORIGIN = 0x20000000,   LENGTH = 128K
+  /* NES builds reserve upper SRAM and the last 24 KiB of CCM for InfoNES. */
+  CCMRAM    (xrw)    : ORIGIN = 0x10000000,   LENGTH = DEFINED(__nes_overlay_enabled) ? 40K : 64K
+  RAM    (xrw)    : ORIGIN = 0x20000000,   LENGTH = DEFINED(__nes_overlay_enabled) ? 64K : 128K
   FLASH    (rx)    : ORIGIN = 0x8000000,   LENGTH = 1024K
 }
 
@@ -113,6 +114,11 @@ SECTIONS
     _edata = .;        /* define a global symbol at data end */
 
   } >RAM AT> FLASH
+
+  .nes_rom (NOLOAD) :
+  {
+    *(.nes_rom .nes_rom.*)
+  } >CCMRAM
 
   _siccmram = LOADADDR(.ccmram);
 

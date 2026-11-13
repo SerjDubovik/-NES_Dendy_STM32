@@ -163,6 +163,9 @@ target_compile_options(${CMAKE_PROJECT_NAME} PRIVATE
 )
 
 # Linker options
+if(NOT LCD_PLAYBACK_DIAGNOSTICS)
+    target_link_options(${CMAKE_PROJECT_NAME} PRIVATE -Wl,--defsym=__nes_overlay_enabled=1)
+endif()
 set_property(TARGET ${CMAKE_PROJECT_NAME} APPEND PROPERTY LINK_DEPENDS ${linker_script_SRC})
 target_link_options(${CMAKE_PROJECT_NAME} PRIVATE
     -T${linker_script_SRC}
@@ -180,6 +183,46 @@ target_link_options(${CMAKE_PROJECT_NAME} PRIVATE
     -Wl,-z,max-page-size=8 # Allow good software remapping across address space (with proper GCC section making)
     -Wl,--print-memory-usage
 )
+
+if(NOT LCD_PLAYBACK_DIAGNOSTICS)
+    set(nes_module_dir "${CMAKE_CURRENT_SOURCE_DIR}/Middlewares/Third_Party/InfoNES")
+    set(nes_module_linker "${CMAKE_CURRENT_SOURCE_DIR}/cmake/nes_module.ld")
+    set(nes_module_packer "${CMAKE_CURRENT_SOURCE_DIR}/cmake/pack_nes_module.ps1")
+    set(nes_module_image "${CMAKE_CURRENT_BINARY_DIR}/NES/InfoNES.bin")
+
+    add_executable(InfoNES_module
+        "${nes_module_dir}/InfoNES.cpp"
+        "${nes_module_dir}/InfoNES_Mapper.cpp"
+        "${nes_module_dir}/InfoNES_STM32.cpp"
+        "${nes_module_dir}/K6502.cpp"
+    )
+    target_include_directories(InfoNES_module PRIVATE Core/Inc)
+    target_compile_options(InfoNES_module PRIVATE
+        ${cpu_PARAMS}
+        -O2 -ffreestanding -fno-unwind-tables -fno-asynchronous-unwind-tables
+    )
+    target_link_options(InfoNES_module PRIVATE
+        ${cpu_PARAMS}
+        -T${nes_module_linker}
+        -nostartfiles -nodefaultlibs
+        -Wl,-Map=${CMAKE_CURRENT_BINARY_DIR}/InfoNES_module.map
+    )
+    target_link_libraries(InfoNES_module PRIVATE c gcc)
+    set_property(TARGET InfoNES_module APPEND PROPERTY LINK_DEPENDS "${nes_module_linker}")
+
+    find_program(nes_powershell NAMES powershell pwsh REQUIRED)
+    add_custom_command(OUTPUT "${nes_module_image}"
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_CURRENT_BINARY_DIR}/NES"
+        COMMAND ${CMAKE_OBJCOPY} -O binary --gap-fill=0 $<TARGET_FILE:InfoNES_module>
+            "${CMAKE_CURRENT_BINARY_DIR}/InfoNES.raw.bin"
+        COMMAND "${nes_powershell}" -NoProfile -NonInteractive -ExecutionPolicy Bypass
+            -File "${nes_module_packer}" "${CMAKE_CURRENT_BINARY_DIR}/InfoNES.raw.bin" "${nes_module_image}"
+        DEPENDS InfoNES_module "${nes_module_packer}"
+        VERBATIM
+    )
+    add_custom_target(NES_Module_Image DEPENDS "${nes_module_image}")
+    add_dependencies(${CMAKE_PROJECT_NAME} NES_Module_Image)
+endif()
 
 # Execute post-build to print size, generate hex and bin
 add_custom_command(TARGET ${CMAKE_PROJECT_NAME} POST_BUILD

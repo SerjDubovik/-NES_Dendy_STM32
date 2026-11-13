@@ -17,6 +17,7 @@
 #define DATA_PULL_MASK_E 0xFFFFC000UL /* PE7 through PE15 */
 
 static uint8_t byte_shift;
+static bool landscape;
 static uint32_t last_fill_ms;
 static uint32_t frame_start;
 static uint32_t pixels_remaining;
@@ -24,7 +25,6 @@ static uint16_t dma_pixels;
 static uint32_t scan_wait_ms;
 static bool scan_synced;
 
-#define SCREEN_PIXELS (ILI9341_WIDTH * ILI9341_HEIGHT)
 
 enum
 {
@@ -222,6 +222,7 @@ void ILI9341_Init(void)
   WriteParameter(0x55); /* RGB565 */
   WriteCommand(LCD_MEMORY_ACCESS_CONTROL);
   WriteParameter(0x48); /* Portrait: reverse column order (MX), BGR panel order */
+  landscape = false;
   WriteCommand(LCD_NORMAL_MODE_ON);
   WriteCommand(LCD_DISPLAY_ON);
 
@@ -231,13 +232,27 @@ void ILI9341_Init(void)
   DMA2_Stream0->FCR = DMA_SxFCR_DMDIS | DMA_SxFCR_FTH_0;
 }
 
-void ILI9341_BeginFrame(void)
+void ILI9341_SetLandscape(void)
+{
+  WriteCommand(LCD_MEMORY_ACCESS_CONTROL);
+  WriteParameter(0x28); /* Exchange column/page axes (MV), BGR panel order. */
+  landscape = true;
+}
+
+void ILI9341_BeginWindow(uint16_t x, uint16_t y, uint16_t width, uint16_t height)
 {
   frame_start = HAL_GetTick();
-  pixels_remaining = SCREEN_PIXELS;
-  SetAddressRange(LCD_COLUMN_ADDRESS, 0, ILI9341_WIDTH - 1U);
-  SetAddressRange(LCD_PAGE_ADDRESS, 0, ILI9341_HEIGHT - 1U);
+  pixels_remaining = (uint32_t)width * height;
+  SetAddressRange(LCD_COLUMN_ADDRESS, x, x + width - 1U);
+  SetAddressRange(LCD_PAGE_ADDRESS, y, y + height - 1U);
   WriteCommand(LCD_MEMORY_WRITE);
+}
+
+void ILI9341_BeginFrame(void)
+{
+  ILI9341_BeginWindow(0, 0,
+      landscape ? ILI9341_HEIGHT : ILI9341_WIDTH,
+      landscape ? ILI9341_WIDTH : ILI9341_HEIGHT);
 }
 
 static void FinishPixels(uint32_t count)

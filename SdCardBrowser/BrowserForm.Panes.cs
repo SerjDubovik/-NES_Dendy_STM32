@@ -38,6 +38,8 @@ internal sealed partial class BrowserForm
             string initial = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
             if (!Directory.Exists(initial)) initial = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
             if (!Directory.Exists(initial)) initial = Path.GetPathRoot(Environment.SystemDirectory)!;
+            if (_settings.PcFolder is { } saved && Path.IsPathFullyQualified(saved) && Directory.Exists(saved))
+                initial = saved;
             await NavigatePcAsync(initial);
         };
         Disposed += (_, _) => Application.RemoveMessageFilter(this);
@@ -91,6 +93,11 @@ internal sealed partial class BrowserForm
         _pcHistory.Visit(folder.FullName, historyStep);
         SelectCurrentDrive();
         statusLabel.Text = $"ПК • Элементов: {rows.Count - (folder.Parent is null ? 0 : 1)}";
+        if (!StringComparer.OrdinalIgnoreCase.Equals(_settings.PcFolder, folder.FullName))
+        {
+            _settings.PcFolder = folder.FullName;
+            SaveSettings();
+        }
     }
 
     private void SetPcLocation(DirectoryInfo folder)

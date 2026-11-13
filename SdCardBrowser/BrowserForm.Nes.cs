@@ -1,6 +1,3 @@
-using System.Text.Json;
-using System.Text.Json.Serialization;
-
 namespace SdCardBrowser;
 
 internal sealed partial class BrowserForm
@@ -9,15 +6,6 @@ internal sealed partial class BrowserForm
     private static readonly string[] NesButtons = ["A", "B", "Select", "Start", "↑", "↓", "←", "→"];
     private static readonly Keys[] DefaultNesKeys =
         [Keys.X, Keys.Z, Keys.Back, Keys.Enter, Keys.Up, Keys.Down, Keys.Left, Keys.Right];
-    private static readonly string NesSettingsPath = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "SdCardBrowser", "nes-keys.json");
-    private static readonly JsonSerializerOptions NesJson = new()
-    {
-        WriteIndented = true,
-        Converters = { new JsonStringEnumConverter<Keys>(allowIntegerValues: false) }
-    };
-
     private readonly TabControl _browserTabs = new() { Dock = DockStyle.Fill };
     private readonly TabPage _nesTab = new("Управление NES");
     private readonly Button _nesPlay = new() { AutoSize = true, Text = "Включить управление" };
@@ -53,7 +41,13 @@ internal sealed partial class BrowserForm
         {
             int index = i;
             var label = new Label { Text = NesButtons[i], AutoSize = true, Anchor = AnchorStyles.Left };
-            var binding = new Button { Width = 144 };
+            var binding = new Button
+            {
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                MinimumSize = new Size(152, 30),
+                Padding = new Padding(8, 3, 8, 3)
+            };
             binding.Click += (_, _) =>
             {
                 StopNesInput();
@@ -74,7 +68,7 @@ internal sealed partial class BrowserForm
             _nesAssign = -1;
             _nesKeys = (Keys[])DefaultNesKeys.Clone();
             UpdateNesBindings();
-            SaveNesKeys();
+            if (SaveSettings()) _nesStatus.Text = "Привязки сохранены.";
         };
         actions.Controls.AddRange([_nesPlay, reset]);
         rows.Controls.Add(actions, 0, NesButtons.Length);
@@ -95,58 +89,22 @@ internal sealed partial class BrowserForm
                 UpdateControls();
             }
         };
-        _browserTabs.SelectedIndexChanged += (_, _) => LeaveNesInput();
+        if (_settings.ShowNesTab) _browserTabs.SelectedTab = _nesTab;
+        _browserTabs.SelectedIndexChanged += (_, _) =>
+        {
+            LeaveNesInput();
+            _settings.ShowNesTab = _browserTabs.SelectedTab == _nesTab;
+            SaveSettings();
+        };
         Deactivate += (_, _) => LeaveNesInput();
         _nesTimer.Tick += async (_, _) => await SendNesInputAsync();
         Disposed += (_, _) => _nesTimer.Dispose();
         _nesTimer.Start();
-        LoadNesKeys();
         UpdateNesBindings();
     }
 
     private static bool IsNesKey(Keys key) => key > Keys.XButton2 && key <= Keys.OemClear &&
         Enum.IsDefined(key) && key is not (Keys.Escape or Keys.LWin or Keys.RWin or Keys.Menu or Keys.LMenu or Keys.RMenu);
-
-    private void LoadNesKeys()
-    {
-        try
-        {
-            if (!File.Exists(NesSettingsPath)) return;
-            var keys = JsonSerializer.Deserialize<Dictionary<string, Keys>>(File.ReadAllText(NesSettingsPath), NesJson);
-            if (keys is null) throw new JsonException();
-            Keys[] saved = NesButtons.Select(button => keys.GetValueOrDefault(button)).ToArray();
-            if (saved.Any(key => !IsNesKey(key)) || saved.Distinct().Count() != NesButtons.Length)
-                throw new JsonException();
-            _nesKeys = saved;
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
-        {
-            _nesStatus.Text = "Не удалось прочитать привязки. Загружены клавиши по умолчанию.";
-        }
-    }
-
-    private void SaveNesKeys()
-    {
-        string temporary = NesSettingsPath + "." + Guid.NewGuid().ToString("N") + ".tmp";
-        try
-        {
-            Directory.CreateDirectory(Path.GetDirectoryName(NesSettingsPath)!);
-            var bindings = NesButtons.Select((button, i) => (button, key: _nesKeys[i]))
-                .ToDictionary(binding => binding.button, binding => binding.key);
-            File.WriteAllText(temporary, JsonSerializer.Serialize(bindings, NesJson));
-            File.Move(temporary, NesSettingsPath, overwrite: true);
-            _nesStatus.Text = "Привязки сохранены.";
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            _nesStatus.Text = $"Не удалось сохранить привязки: {ex.Message}";
-        }
-        finally
-        {
-            try { File.Delete(temporary); }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
-        }
-    }
 
     private void UpdateNesBindings()
     {
@@ -194,7 +152,7 @@ internal sealed partial class BrowserForm
                 if (existing >= 0 && existing != _nesAssign)
                     _nesKeys[existing] = _nesKeys[_nesAssign];
                 _nesKeys[_nesAssign] = key;
-                SaveNesKeys();
+                if (SaveSettings()) _nesStatus.Text = "Привязки сохранены.";
             }
             else _nesStatus.Text = "Назначение отменено.";
             _nesAssign = -1;
