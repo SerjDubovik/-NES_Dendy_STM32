@@ -40,6 +40,7 @@
 #include "InfoNES_System.h"
 #include "InfoNES_Mapper.h"
 #include "K6502.h"
+#include "nes_module.h"
 
 /*-------------------------------------------------------------------*/
 /*  NES resources                                                    */
@@ -85,6 +86,7 @@ BYTE PPU_R1;
 BYTE PPU_R2;
 BYTE PPU_R3;
 BYTE PPU_R7;
+BYTE PPU_OpenBus;
 
 /* Fine X scroll (the other scroll bits are stored in the VRAM addresses). */
 BYTE PPU_FineX;
@@ -410,7 +412,7 @@ void InfoNES_SetupPPU()
   InfoNES_MemorySet( SPRRAM, 0, sizeof SPRRAM );
 
   // Reset PPU Register
-  PPU_R0 = PPU_R1 = PPU_R2 = PPU_R3 = PPU_R7 = 0;
+  PPU_R0 = PPU_R1 = PPU_R2 = PPU_R3 = PPU_R7 = PPU_OpenBus = 0;
 
   // Reset latch flag
   PPU_Latch_Flag = 0;
@@ -466,6 +468,8 @@ void InfoNES_Mirroring( int nType )
   PPUBANK[ NAME_TABLE1 ] = &PPURAM[ PPU_MirrorTable[ nType ][ 1 ] * 0x400 ];
   PPUBANK[ NAME_TABLE2 ] = &PPURAM[ PPU_MirrorTable[ nType ][ 2 ] * 0x400 ];
   PPUBANK[ NAME_TABLE3 ] = &PPURAM[ PPU_MirrorTable[ nType ][ 3 ] * 0x400 ];
+  for (unsigned page = 8; page < 12; ++page)
+    PPUBANK[page + 4] = PPUBANK[page];
 }
 
 /*===================================================================*/
@@ -515,6 +519,26 @@ static int SpriteZeroHitX()
     if ( PPU_BG_Base[ tile * 64 + fineY + ( ( x + PPU_FineX ) & 7 ) ] )
       return (int)x;
   }
+#ifdef INFONES_AXROM
+  // Battletoads & Double Dragon places its split-screen marker at x=254.
+  // Its late rendering start can put the scanline renderer's background
+  // up to one tile row out of phase with the sprite. Check nearby rows for
+  // the marker pixel before the sprite leaves the current scanline range.
+  if (first == 254 && row + 2 == PPU_SP_Height && pattern[flip]) {
+    const unsigned tileX = ((first + PPU_FineX) >> 3) + (PPU_Addr & 31);
+    const unsigned table = ((PPU_Addr >> 10) & 3) ^ (tileX >> 5);
+    const unsigned fineX = (first + PPU_FineX) & 7;
+    const int y = ((PPU_Addr >> 5) & 31) * 8 + fineY / 8;
+    // The normal overlap test above already checked the current row.
+    for (int delta = -8; delta <= 8; ++delta) {
+      const int sample = y + delta;
+      if (delta == 0 || sample < 0 || sample >= 240) continue;
+      const BYTE tile = PPUBANK[NAME_TABLE0 + table][(sample / 8) * 32 + (tileX & 31)];
+      if (PPU_BG_Base[tile * 64 + (sample % 8) * 8 + fineX])
+        return (int)first;
+    }
+  }
+#endif
   return -1;
 }
 
@@ -542,10 +566,15 @@ void InfoNES_RunFrame()
   do
   {
     const bool visible = PPU_Scanline < NES_DISP_HEIGHT;
-    const bool preRender = PPU_Scanline == SCAN_PRE_RENDER;
+    const unsigned timing = NesRomTiming(reinterpret_cast<const uint8_t *>(&NesHeader));
+    const bool pal = timing == 1;
+    const bool dendy = timing == 3;
+    const unsigned dotsNumerator = pal ? 5U : 1U;
+    const unsigned dotsDenominator = pal ? 16U : 3U;
+    const bool preRender = PPU_Scanline == ((pal || dendy) ? 311 : SCAN_PRE_RENDER);
     if ( preRender )
       PPU_R2 &= ~( R2_IN_VBLANK | R2_HIT_SP | R2_MAX_SP );
-    else if ( PPU_Scanline == SCAN_VBLANK_START )
+    else if ( PPU_Scanline == (dendy ? 291 : SCAN_VBLANK_START) )
     {
       PPU_R2 |= R2_IN_VBLANK;
       InfoNES_PadState( &PAD1_Latch, &PAD2_Latch, &PAD_System );
@@ -554,8 +583,17 @@ void InfoNES_RunFrame()
     }
 
     const unsigned phase = PpuPhase;
-    const unsigned cycles = ( PpuDotsPerLine + phase ) / 3;
-    PpuPhase = ( PpuDotsPerLine + phase ) % 3;
+    const unsigned lineTime = PpuDotsPerLine * dotsNumerator + phase;
+    const unsigned cycles = lineTime / dotsDenominator;
+    PpuPhase = lineTime % dotsDenominator;
+    unsigned ran = 0;
+    auto stepTo = [&](unsigned dot) {
+      const unsigned deadline = (dot * dotsNumerator + phase) / dotsDenominator;
+      if (deadline > ran) {
+        K6502_Step(deadline - ran);
+        ran = deadline;
+      }
+    };
     if ( visible )
     {
       if ( ChrBufUpdate )
@@ -567,38 +605,44 @@ void InfoNES_RunFrame()
       InfoNES_DrawLine();
       if ( hit >= 0 )
       {
-        const unsigned beforeHit = ( (unsigned)hit + 1 + phase ) / 3;
-        K6502_Step( beforeHit );
+        stepTo((unsigned)hit + 2);
         if ( ( PPU_R1 & ( R1_SHOW_SCR | R1_SHOW_SP ) ) == ( R1_SHOW_SCR | R1_SHOW_SP ) )
           PPU_R2 |= R2_HIT_SP;
-        K6502_Step( cycles - beforeHit );
-      }
-      else
-      {
-        K6502_Step( cycles );
       }
 
       for ( WORD &pixel : Scanline )
         pixel = NesPalette[ pixel & 0x3f ];
       InfoNES_DrawScanline( PPU_Scanline, Scanline );
     }
-    else
+    if (visible || preRender)
     {
-      K6502_Step( cycles );
-    }
-
-    if ( PPU_R1 & ( R1_SHOW_SCR | R1_SHOW_SP ) )
-    {
-      if ( visible )
-      {
+      stepTo(256);
+      if (visible && (PPU_R1 & (R1_SHOW_SCR | R1_SHOW_SP)))
         AdvanceVerticalScroll();
-        PPU_Addr = ( PPU_Addr & ~0x041f ) | ( PPU_Temp & 0x041f );
+      stepTo(257);
+      if (PPU_R1 & (R1_SHOW_SCR | R1_SHOW_SP))
+        PPU_Addr = (PPU_Addr & ~0x041f) | (PPU_Temp & 0x041f);
+#ifdef INFONES_MMC3
+      const unsigned irqDot = (PPU_R0 & R0_BG_ADDR) ? 324 : 260;
+      if (irqDot < 304) {
+        stepTo(irqDot);
+        InfoNES_Mmc3Scanline(preRender);
       }
-      else if ( preRender )
+#endif
+      if (preRender)
       {
-        PPU_Addr = PPU_Temp;
+        stepTo(304);
+        if (PPU_R1 & (R1_SHOW_SCR | R1_SHOW_SP))
+          PPU_Addr = (PPU_Addr & ~0x7be0) | (PPU_Temp & 0x7be0);
       }
+#ifdef INFONES_MMC3
+      if (irqDot >= 304) {
+        stepTo(irqDot);
+        InfoNES_Mmc3Scanline(preRender);
+      }
+#endif
     }
+    if (cycles > ran) K6502_Step(cycles - ran);
 
     FrameStep += cycles;
     if ( FrameStep > STEP_PER_FRAME && FrameIRQ_Enable )
@@ -766,7 +810,7 @@ static void InfoNES_DrawLine()
       const unsigned row = (unsigned)( PPU_Scanline - oam[ SPR_Y ] - 1 );
       if ( row >= height )
         continue;
-      ++count;
+      if (++count > 8) break;
 
       const unsigned first = oam[ SPR_X ];
       const unsigned attr = oam[ SPR_ATTR ];
@@ -788,7 +832,7 @@ static void InfoNES_DrawLine()
           Scanline[ x ] = palette[ color ];
       }
     }
-    if ( count >= 8 )
+    if ( count > 8 )
       PPU_R2 |= R2_MAX_SP;
   }
 }

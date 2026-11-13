@@ -3,7 +3,7 @@ EXTERN(NesModule_RunFrame)
 
 MEMORY
 {
-  NESRAM (rwx) : ORIGIN = 0x20010000, LENGTH = 64K
+  NESRAM (rwx) : ORIGIN = 0x20010000, LENGTH = 63K
   NESCCM (rw)  : ORIGIN = 0x1000A000, LENGTH = 24K
 }
 
@@ -21,7 +21,7 @@ SECTIONS
   .header :
   {
     LONG(0x3153454E)
-    LONG(1)
+    LONG(DEFINED(__nes_module_abi) ? __nes_module_abi : 1)
     LONG(__image_end - ORIGIN(NESRAM))
     LONG(ADDR(.bss) - ORIGIN(NESRAM))
     LONG(SIZEOF(.bss))

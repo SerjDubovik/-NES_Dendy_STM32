@@ -61,7 +61,7 @@ void Map0_Init()
   }
 
   /* Set PPU Banks */
-  if ( NesHeader.byVRomSize > 0 )
+  if ( VROM )
   {
     for ( int nPage = 0; nPage < 8; ++nPage )
       PPUBANK[ nPage ] = VROMPAGE( nPage );

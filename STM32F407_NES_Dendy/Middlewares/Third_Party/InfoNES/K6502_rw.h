@@ -36,7 +36,11 @@ static inline BYTE K6502_ReadZp( BYTE byAddr )
  *    Read Data
  */
 
-  return RAM[ byAddr ];
+#ifdef INFONES_AXROM
+  return CpuDataBus = RAM[byAddr];
+#else
+  return RAM[byAddr];
+#endif
 }
 
 /*===================================================================*/
@@ -44,7 +48,16 @@ static inline BYTE K6502_ReadZp( BYTE byAddr )
 /*               K6502_Read() : Reading operation                    */
 /*                                                                   */
 /*===================================================================*/
-static inline BYTE K6502_Read( WORD wAddr )
+#ifdef INFONES_AXROM
+static inline BYTE K6502_Read(WORD address)
+{
+  return CpuDataBus = K6502_ReadBus(address);
+}
+
+static inline BYTE K6502_ReadBus(WORD wAddr)
+#else
+static inline BYTE K6502_Read(WORD wAddr)
+#endif
 {
 /*
  *  Reading operation
@@ -76,33 +89,36 @@ static inline BYTE K6502_Read( WORD wAddr )
       {
         WORD addr = PPU_Addr & 0x3fff;
 
-        // Set return value;
-	byRet = PPU_R7;
-
-        // Increment PPU Address
-        PPU_Addr = ( PPU_Addr + PPU_Increment ) & 0x7fff;
-
-        // Read PPU Memory
-        PPU_R7 = PPUBANK[ addr >> 10 ][ addr & 0x3ff ];
-
-        return byRet;
+        byRet = PPU_R7;
+        if (addr >= 0x3f00) {
+          unsigned color = addr & 31;
+          if ((color & 3) == 0) color &= 15;
+          byRet = (PPURAM[0x3f00 + color] & 0x3f) | (PPU_OpenBus & 0xc0);
+          addr -= 0x1000;
+        }
+        PPU_R7 = PPUBANK[addr >> 10][addr & 0x3ff];
+        PPU_Addr = (PPU_Addr + PPU_Increment) & 0x7fff;
+#ifdef INFONES_MMC3
+        InfoNES_Mmc3A12(PPU_Addr, K6502_CycleBase + g_wPassedClocks);
+#endif
+        return PPU_OpenBus = byRet;
       }
       else
       if ( ( wAddr & 0x7 ) == 0x4 )   /* SPR_RAM I/O Register */
       {
-        return SPRRAM[ PPU_R3++ ];
+        return PPU_OpenBus = SPRRAM[ PPU_R3 ];
       }
       else                            
       if ( ( wAddr & 0x7 ) == 0x2 )   /* PPU Status */
       {
-        byRet = PPU_R2;
+        byRet = (PPU_R2 & 0xe0) | (PPU_OpenBus & 0x1f);
         PPU_R2 &= ~R2_IN_VBLANK;
         PPU_Latch_Flag = 0;
-        return byRet;
+        return PPU_OpenBus = byRet;
       }
       else /* $2000, $2001, $2003, $2005, $2006 */
       {
-	return PPU_R7;
+	return PPU_OpenBus;
       }
       break;
 
@@ -125,16 +141,16 @@ static inline BYTE K6502_Read( WORD wAddr )
       if ( wAddr == 0x4016 )
       {
         // Set Joypad1 data
-        byRet = (BYTE)( ( PAD1_Latch >> PAD1_Bit ) & 1 ) | 0x40;
-        PAD1_Bit = ( PAD1_Bit == 23 ) ? 0 : ( PAD1_Bit + 1 );
+        byRet = (PAD1_Bit >= 8 ? 1 : (PAD1_Latch >> PAD1_Bit) & 1) | 0x40;
+        if (!(APU_Reg[0x16] & 1) && PAD1_Bit < 8) ++PAD1_Bit;
         return byRet;
       }
       else
       if ( wAddr == 0x4017 )
       {
         // Set Joypad2 data
-        byRet = (BYTE)( ( PAD2_Latch >> PAD2_Bit ) & 1 ) | 0x40;
-        PAD2_Bit = ( PAD2_Bit == 23 ) ? 0 : ( PAD2_Bit + 1 );
+        byRet = (PAD2_Bit >= 8 ? 1 : (PAD2_Latch >> PAD2_Bit) & 1) | 0x40;
+        if (!(APU_Reg[0x16] & 1) && PAD2_Bit < 8) ++PAD2_Bit;
         return byRet;
       }
       else 
@@ -146,6 +162,11 @@ static inline BYTE K6502_Read( WORD wAddr )
       // The other sound registers are not readable.
 
     case 0x6000:  /* SRAM */
+#if defined(INFONES_AXROM)
+      return CpuDataBus;
+#elif defined(INFONES_MMC1) || defined(INFONES_MMC3)
+      return PrgRamRead ? SRAM[wAddr & PrgRamMask] : (BYTE)(wAddr >> 8);
+#else
       if ( ROM_SRAM )
       {
         return SRAM[ wAddr & 0x1fff ];
@@ -153,6 +174,14 @@ static inline BYTE K6502_Read( WORD wAddr )
         return SRAMBANK[ wAddr & 0x1fff ];
       }
 
+#endif
+#if defined(INFONES_AXROM) || defined(INFONES_MMC1) || defined(INFONES_MMC3)
+    case 0x8000:
+    case 0xa000:
+    case 0xc000:
+    case 0xe000:
+      return InfoNES_ReadMappedPrg(wAddr);
+#else
     case 0x8000:  /* ROM BANK 0 */
       return ROMBANK0[ wAddr & 0x1fff ];
 
@@ -164,6 +193,7 @@ static inline BYTE K6502_Read( WORD wAddr )
 
     case 0xe000:  /* ROM BANK 3 */
       return ROMBANK3[ wAddr & 0x1fff ];
+#endif
   }
 
   return ( wAddr >> 8 ); /* when a register is not readable the upper half
@@ -196,6 +226,9 @@ static inline void K6502_Write( WORD wAddr, BYTE byData )
  *
  */
 
+#ifdef INFONES_AXROM
+  CpuDataBus = byData;
+#endif
   switch ( wAddr & 0xe000 )
   {
     case 0x0000:  /* RAM */
@@ -203,6 +236,7 @@ static inline void K6502_Write( WORD wAddr, BYTE byData )
       break;
 
     case 0x2000:  /* PPU */
+      PPU_OpenBus = byData;
       switch ( wAddr & 0x7 )
       {
         case 0:    /* 0x2000 */
@@ -257,6 +291,9 @@ static inline void K6502_Write( WORD wAddr, BYTE byData )
           {
             PPU_Temp = ( PPU_Temp & 0x7f00 ) | byData;
             PPU_Addr = PPU_Temp;
+#ifdef INFONES_MMC3
+            InfoNES_Mmc3A12(PPU_Addr, K6502_CycleBase + g_wPassedClocks);
+#endif
           }
           else
           {
@@ -272,6 +309,9 @@ static inline void K6502_Write( WORD wAddr, BYTE byData )
             // Increment PPU Address
             PPU_Addr = ( PPU_Addr + PPU_Increment ) & 0x7fff;
             addr &= 0x3fff;
+#ifdef INFONES_MMC3
+            InfoNES_Mmc3A12(PPU_Addr, K6502_CycleBase + g_wPassedClocks);
+#endif
 
             // Write to PPU Memory
             if ( addr < 0x2000 )
@@ -287,8 +327,7 @@ static inline void K6502_Write( WORD wAddr, BYTE byData )
             if ( addr < 0x3f00 )  /* 0x2000 - 0x3eff */
             {
               // Name Table and mirror
-              PPUBANK[   addr            >> 10 ][ addr & 0x3ff ] = byData;
-              PPUBANK[ ( addr ^ 0x1000 ) >> 10 ][ addr & 0x3ff ] = byData;
+              PPUBANK[addr >> 10][addr & 0x3ff] = byData;
             }
             else
             if ( !( addr & 0xf ) )  /* 0x3f00 or 0x3f10 */
@@ -338,40 +377,19 @@ static inline void K6502_Write( WORD wAddr, BYTE byData )
           break;
 
         case 0x14:  /* 0x4014 */
-          // Sprite DMA
-          switch ( byData >> 5 )
-          {
-            case 0x0:  /* RAM */
-              InfoNES_MemoryCopy( SPRRAM, &RAM[ ( (WORD)byData << 8 ) & 0x7ff ], SPRRAM_SIZE );
-              break;
-
-            case 0x3:  /* SRAM */
-              InfoNES_MemoryCopy( SPRRAM, &SRAM[ ( (WORD)byData << 8 ) & 0x1fff ], SPRRAM_SIZE );
-              break;
-
-            case 0x4:  /* ROM BANK 0 */
-              InfoNES_MemoryCopy( SPRRAM, &ROMBANK0[ ( (WORD)byData << 8 ) & 0x1fff ], SPRRAM_SIZE );
-              break;
-
-            case 0x5:  /* ROM BANK 1 */
-              InfoNES_MemoryCopy( SPRRAM, &ROMBANK1[ ( (WORD)byData << 8 ) & 0x1fff ], SPRRAM_SIZE );
-              break;
-
-            case 0x6:  /* ROM BANK 2 */
-              InfoNES_MemoryCopy( SPRRAM, &ROMBANK2[ ( (WORD)byData << 8 ) & 0x1fff ], SPRRAM_SIZE );
-              break;
-
-            case 0x7:  /* ROM BANK 3 */
-              InfoNES_MemoryCopy( SPRRAM, &ROMBANK3[ ( (WORD)byData << 8 ) & 0x1fff ], SPRRAM_SIZE );
-              break;
-          }
+        {
+          const WORD source = (WORD)byData << 8;
+          for (unsigned i = 0; i < SPRRAM_SIZE; ++i)
+            SPRRAM[PPU_R3++] = K6502_Read(source + i);
+          CLK(513 + ((K6502_CycleBase + g_wPassedClocks) & 1));
           break;
+        }
 
         case 0x16:  /* 0x4016 */
 	  // For VS-Unisystem
 	  MapperApu( wAddr, byData );
           // Reset joypad
-          if ( !( APU_Reg[ 0x16 ] & 1 ) && ( byData & 1 ) )
+          if ( ( APU_Reg[ 0x16 ] | byData ) & 1 )
           {
             PAD1_Bit = 0;
             PAD2_Bit = 0;
@@ -403,6 +421,11 @@ static inline void K6502_Write( WORD wAddr, BYTE byData )
       break;
 
     case 0x6000:  /* SRAM */
+#if defined(INFONES_AXROM)
+      break; // AxROM has no PRG RAM.
+#elif defined(INFONES_MMC1) || defined(INFONES_MMC3)
+      if (PrgRamWrite) SRAM[wAddr & PrgRamMask] = byData;
+#else
       SRAM[ wAddr & 0x1fff ] = byData;
 
       /* Write to SRAM, when no SRAM */
@@ -410,6 +433,7 @@ static inline void K6502_Write( WORD wAddr, BYTE byData )
       {
         MapperSram( wAddr, byData );
       }
+#endif
       break;
 
     case 0x8000:  /* ROM BANK 0 */
@@ -429,7 +453,11 @@ static inline WORD K6502_ReadW( WORD wAddr )
   return low | (WORD)K6502_Read( wAddr + 1 ) << 8;
 }
 static inline void K6502_WriteW( WORD wAddr, WORD wData ){ K6502_Write( wAddr, wData & 0xff ); K6502_Write( wAddr + 1, wData >> 8 ); };
-static inline WORD K6502_ReadZpW( BYTE byAddr ){ return K6502_ReadZp( byAddr ) | ( K6502_ReadZp( byAddr + 1 ) << 8 ); };
+static inline WORD K6502_ReadZpW(BYTE address)
+{
+  const WORD low = K6502_ReadZp(address);
+  return low | ((WORD)K6502_ReadZp(address + 1) << 8);
+}
 
 // 6502's indirect absolute jmp(opcode: 6C) has a bug (added at 01/08/15 )
 static inline WORD K6502_ReadW2( WORD wAddr )

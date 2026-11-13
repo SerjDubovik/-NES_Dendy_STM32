@@ -35,6 +35,9 @@ int InfoNES_ReadRom(const char *)
     InfoNES_MemoryCopy(&NesHeader, romHeader, sizeof(NesHeader));
     InfoNES_MemorySet(SRAM, 0, SRAM_SIZE);
     if (trainerData) InfoNES_MemoryCopy(SRAM + 0x1000, trainerData, 512);
+#if defined(INFONES_MMC1) || defined(INFONES_MMC3)
+    board->load_save(SRAM);
+#endif
     ROM = prgData;
     VROM = chrData;
     return 0;
@@ -74,6 +77,20 @@ void *InfoNES_MemorySet(void *dest, int value, int count)
 }
 
 void InfoNES_MessageBox(const char *, ...) {}
+
+#ifdef INFONES_UXROM
+bool InfoNES_ReadPrgBank(BYTE bank, BYTE *destination)
+{
+    return board->read_prg_bank(bank, destination);
+}
+#endif
+
+#if defined(INFONES_MMC1) || defined(INFONES_CNROM) || defined(INFONES_MMC3) || defined(INFONES_AXROM)
+bool InfoNES_ReadCart(bool chr, uint32_t offset, BYTE *destination, unsigned length)
+{
+    return board->read_rom(chr, offset, destination, length);
+}
+#endif
 
 extern "C" int NesModule_Init(const NesModuleApi *api, const uint8_t *header,
                                uint8_t *prg, uint8_t *chr, const uint8_t *trainer)

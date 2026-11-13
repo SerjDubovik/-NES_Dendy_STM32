@@ -12,9 +12,14 @@
 /*-------------------------------------------------------------------*/
 
 #include "K6502.h"
+#include "InfoNES.h"
 #include "InfoNES_System.h"
 
 static inline BYTE K6502_Read( WORD wAddr );
+#ifdef INFONES_AXROM
+static BYTE CpuDataBus;
+static inline BYTE K6502_ReadBus(WORD address);
+#endif
 static inline WORD K6502_ReadW( WORD wAddr );
 static inline WORD K6502_ReadW2( WORD wAddr );
 static inline BYTE K6502_ReadZp( BYTE byAddr );
@@ -24,6 +29,7 @@ static inline BYTE K6502_ReadAbsY();
 static inline BYTE K6502_ReadIY();
 static inline void K6502_Write( WORD wAddr, BYTE byData );
 static inline void K6502_WriteW( WORD wAddr, WORD wData );
+static inline void K6502_RmwWrite(WORD address, BYTE before, BYTE after);
 static inline WORD K6502_FetchAddress( WORD &pc, WORD advance );
 
 /*-------------------------------------------------------------------*/
@@ -117,18 +123,18 @@ static inline WORD K6502_FetchAddress( WORD &pc, WORD advance );
                 SETF( g_byTestTable[ byD1 ] | ( ( ( A ^ byD0 ) & ( A ^ byD1 ) & 0x80 ) ? FLAG_V : 0 ) | ( wD0 < 0x100 ) ); \
                 A = byD1;
 
-#define DEC(a)  wA0 = a; byD0 = K6502_Read( wA0 ); --byD0; K6502_Write( wA0, byD0 ); TEST( byD0 )
-#define INC(a)  wA0 = a; byD0 = K6502_Read( wA0 ); ++byD0; K6502_Write( wA0, byD0 ); TEST( byD0 )
+#define DEC(a)  wA0 = a; byD0 = K6502_Read( wA0 ); byD1 = byD0--; K6502_RmwWrite(wA0, byD1, byD0); TEST( byD0 )
+#define INC(a)  wA0 = a; byD0 = K6502_Read( wA0 ); byD1 = byD0++; K6502_RmwWrite(wA0, byD1, byD0); TEST( byD0 )
 
 // Shift Op.
 #define ASLA    RSTF( FLAG_N | FLAG_Z | FLAG_C ); SETF( g_ASLTable[ A ].byFlag ); A = g_ASLTable[ A ].byValue 
-#define ASL(a)  RSTF( FLAG_N | FLAG_Z | FLAG_C ); wA0 = a; byD0 = K6502_Read( wA0 ); SETF( g_ASLTable[ byD0 ].byFlag ); K6502_Write( wA0, g_ASLTable[ byD0 ].byValue )
+#define ASL(a)  RSTF( FLAG_N | FLAG_Z | FLAG_C ); wA0 = a; byD0 = K6502_Read( wA0 ); SETF( g_ASLTable[ byD0 ].byFlag ); K6502_RmwWrite(wA0, byD0, g_ASLTable[byD0].byValue)
 #define LSRA    RSTF( FLAG_N | FLAG_Z | FLAG_C ); SETF( g_LSRTable[ A ].byFlag ); A = g_LSRTable[ A ].byValue 
-#define LSR(a)  RSTF( FLAG_N | FLAG_Z | FLAG_C ); wA0 = a; byD0 = K6502_Read( wA0 ); SETF( g_LSRTable[ byD0 ].byFlag ); K6502_Write( wA0, g_LSRTable[ byD0 ].byValue ) 
+#define LSR(a)  RSTF( FLAG_N | FLAG_Z | FLAG_C ); wA0 = a; byD0 = K6502_Read( wA0 ); SETF( g_LSRTable[ byD0 ].byFlag ); K6502_RmwWrite(wA0, byD0, g_LSRTable[byD0].byValue) 
 #define ROLA    byD0 = F & FLAG_C; RSTF( FLAG_N | FLAG_Z | FLAG_C ); SETF( g_ROLTable[ byD0 ][ A ].byFlag ); A = g_ROLTable[ byD0 ][ A ].byValue 
-#define ROL(a)  byD1 = F & FLAG_C; RSTF( FLAG_N | FLAG_Z | FLAG_C ); wA0 = a; byD0 = K6502_Read( wA0 ); SETF( g_ROLTable[ byD1 ][ byD0 ].byFlag ); K6502_Write( wA0, g_ROLTable[ byD1 ][ byD0 ].byValue )
+#define ROL(a)  byD1 = F & FLAG_C; RSTF( FLAG_N | FLAG_Z | FLAG_C ); wA0 = a; byD0 = K6502_Read( wA0 ); SETF( g_ROLTable[ byD1 ][ byD0 ].byFlag ); K6502_RmwWrite(wA0, byD0, g_ROLTable[byD1][byD0].byValue)
 #define RORA    byD0 = F & FLAG_C; RSTF( FLAG_N | FLAG_Z | FLAG_C ); SETF( g_RORTable[ byD0 ][ A ].byFlag ); A = g_RORTable[ byD0 ][ A ].byValue 
-#define ROR(a)  byD1 = F & FLAG_C; RSTF( FLAG_N | FLAG_Z | FLAG_C ); wA0 = a; byD0 = K6502_Read( wA0 ); SETF( g_RORTable[ byD1 ][ byD0 ].byFlag ); K6502_Write( wA0, g_RORTable[ byD1 ][ byD0 ].byValue )
+#define ROR(a)  byD1 = F & FLAG_C; RSTF( FLAG_N | FLAG_Z | FLAG_C ); wA0 = a; byD0 = K6502_Read( wA0 ); SETF( g_RORTable[ byD1 ][ byD0 ].byFlag ); K6502_RmwWrite(wA0, byD0, g_RORTable[byD1][byD0].byValue)
 
 // Jump Op.
 #define JSR     wA0 = AA_ABS2; PUSHW( PC ); PC = wA0; 
@@ -139,10 +145,10 @@ static inline WORD K6502_FetchAddress( WORD &pc, WORD advance );
   if ( a ) \
   { \
     wA0 = PC; \
-	byD0 = K6502_Read( PC ); \
-	PC += ( ( byD0 & 0x80 ) ? ( 0xFF00 | (WORD)byD0 ) : (WORD)byD0 ); \
-	CLK( 3 + ( ( wA0 & 0x0100 ) != ( PC & 0x0100 ) ) ); \
-    ++PC; \
+    byD0 = K6502_Read( PC++ ); \
+    wA0 = PC; \
+    PC += (int8_t)byD0; \
+    CLK( 3 + ( ( wA0 & 0xff00 ) != ( PC & 0xff00 ) ) ); \
   } else { \
 	++PC; \
 	CLK( 2 ); \
@@ -177,6 +183,7 @@ BYTE NMI_Wiring;
 
 // The number of the clocks that it passed
 WORD g_wPassedClocks;
+uint32_t K6502_CycleBase;
 
 // A table for the test
 BYTE g_byTestTable[ 256 ];
@@ -339,6 +346,7 @@ void K6502_Reset()
 
   // Reset Passed Clocks
   g_wPassedClocks = 0;
+  K6502_CycleBase = 0;
 }
 
 /*===================================================================*/
@@ -396,7 +404,11 @@ void K6502_Step( WORD wClocks )
     PC = K6502_ReadW( VECTOR_NMI );
   }
   else
-  if ( IRQ_State != IRQ_Wiring )
+  if ( IRQ_State != IRQ_Wiring
+#ifdef INFONES_MMC3
+       || MapperIrqPending
+#endif
+     )
   {
     // IRQ Interrupt
     // Execute IRQ if an I flag isn't being set
@@ -627,7 +639,11 @@ void K6502_Step( WORD wClocks )
       case 0x58: // CLI
         byD0 = F;
         RSTF( FLAG_I ); CLK( 2 );
-        if ( ( byD0 & FLAG_I ) && IRQ_State != IRQ_Wiring )  
+        if ( ( byD0 & FLAG_I ) && (IRQ_State != IRQ_Wiring
+#ifdef INFONES_MMC3
+             || MapperIrqPending
+#endif
+           ) )  
         {
           IRQ_State = IRQ_Wiring;          
           CLK( 7 );
@@ -1105,6 +1121,7 @@ void K6502_Step( WORD wClocks )
 
   // Correct the number of the clocks
   g_wPassedClocks -= wClocks;
+  K6502_CycleBase += wClocks;
 }
 
 // Addressing Op.
@@ -1122,6 +1139,21 @@ static inline BYTE K6502_ReadIY(){ WORD wA0, wA1; wA0 = K6502_ReadZpW( K6502_Rea
 /*                                                                   */
 /*===================================================================*/
 #include "K6502_rw.h"
+
+static inline void K6502_RmwWrite(WORD address, BYTE before, BYTE after)
+{
+    // 6502 writes the original value before the result. MMC1 only latches the
+    // first of those consecutive writes, but a reset write is always honored.
+#ifdef INFONES_MMC1
+    if (address >= 0x8000) {
+        K6502_Write(address, before);
+        if (after & 0x80) K6502_Write(address, after);
+        return;
+    }
+#endif
+    if (address >= 0x2000) K6502_Write(address, before);
+    K6502_Write(address, after);
+}
 
 // Sequence operand reads and advance PC before the caller uses the result.
 static inline WORD K6502_FetchAddress( WORD &pc, WORD advance )

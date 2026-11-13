@@ -4,6 +4,7 @@
 #include "ili9341.h"
 #ifndef LCD_PLAYBACK_DIAGNOSTICS
 #include "nes_game.h"
+#include "nes_menu.h"
 #endif
 #include "usbd_cdc_if.h"
 #include "usart_ring.h"
@@ -20,6 +21,11 @@
 #define MAX_RESPONSE (BLOCK_SIZE * 2 + 128)
 #define TRANSFER_IDLE_MS 30000U
 #define NES_PAD_IDLE_MS 400U
+#ifdef LCD_PLAYBACK_DIAGNOSTICS
+#define BROWSER_PROTOCOL_VERSION "4"
+#else
+#define BROWSER_PROTOCOL_VERSION "5"
+#endif
 
 enum { ID = 1, OP = 2, PATH = 4, TO = 8, SIZE = 16, OFFSET = 32, FIELD_CRC = 64, DATA = 128, MASK = 256 };
 
@@ -545,6 +551,11 @@ static FRESULT mount_volume(bool nor)
     if (nor ? retNOR != 0 : retSD != 0) return FR_NOT_READY;
 
     const TCHAR *requested = nor ? nor_drive : sd_drive;
+#ifndef LCD_PLAYBACK_DIAGNOSTICS
+    // Remounting would invalidate the open ROM file.
+    if (!nor && NesGame_UsesSdStream()) result = FR_OK;
+    else
+#endif
     result = f_mount(nor ? &NorFatFS : &SDFatFS, requested, 1);
     if (result == FR_OK) {
         result = f_chdrive(requested);
@@ -587,6 +598,12 @@ static FRESULT report_free_space(uint32_t id)
 static FRESULT execute(Request *req)
 {
 #ifndef LCD_PLAYBACK_DIAGNOSTICS
+    if (equal(req->op, u"nesmenu")) {
+        if (reply_port != PORT_UART || req->fields) return FR_INVALID_PARAMETER;
+        nes_pad = 0;
+        NesMenu_RequestReturn();
+        return FR_OK;
+    }
     if (equal(req->op, u"nesstat") && !req->fields) {
         NesGameTiming timing = NesGame_GetTiming();
         return transmit(snprintf(response, sizeof(response),
@@ -687,7 +704,7 @@ static void receive_byte(BrowserPort port, char ch)
         FRESULT result = parse_request(input->data) ? execute(&request) : FR_INVALID_PARAMETER;
         if (result == FR_OK && (equal(request.op, u"mount") || equal(request.op, u"mntnor"))) {
             volumes[port] = drive;
-            transmit(snprintf(response, sizeof(response), "{\"id\":%lu,\"result\":0,\"version\":4}\n",
+            transmit(snprintf(response, sizeof(response), "{\"id\":%lu,\"result\":0,\"version\":" BROWSER_PROTOCOL_VERSION "}\n",
                 (unsigned long)request.id));
         } else {
             send_result(request.id, result);

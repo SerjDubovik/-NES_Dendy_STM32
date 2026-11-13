@@ -6,7 +6,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $image = [IO.File]::ReadAllBytes($InputPath)
 if ($image.Length -lt 32 -or [BitConverter]::ToUInt32($image, 0) -ne 0x3153454E -or
-    [BitConverter]::ToUInt32($image, 4) -ne 1 -or
+    [BitConverter]::ToUInt32($image, 4) -notin 1, 2, 4, 5, 6, 7 -or
     [BitConverter]::ToUInt32($image, 8) -ne $image.Length -or
     [BitConverter]::ToUInt32($image, 20) -ne 0) {
     throw 'Invalid InfoNES image header'
@@ -14,7 +14,7 @@ if ($image.Length -lt 32 -or [BitConverter]::ToUInt32($image, 0) -ne 0x3153454E 
 
 $bssOffset = [BitConverter]::ToUInt32($image, 12)
 $bssSize = [BitConverter]::ToUInt32($image, 16)
-if ($bssOffset -lt $image.Length -or $bssOffset + $bssSize -gt 65536) {
+if ($bssOffset -lt $image.Length -or $bssOffset + $bssSize -gt (63 * 1024)) {
     throw 'InfoNES state exceeds its SRAM region'
 }
 foreach ($entryOffset in 24, 28) {

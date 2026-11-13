@@ -8,6 +8,7 @@ internal sealed partial class BrowserForm
         [Keys.X, Keys.Z, Keys.Back, Keys.Enter, Keys.Up, Keys.Down, Keys.Left, Keys.Right];
     private readonly TabControl _browserTabs = new() { Dock = DockStyle.Fill };
     private readonly TabPage _nesTab = new("Управление NES");
+    private readonly Button _nesReturn = new() { AutoSize = true, Text = "В меню" };
     private readonly Button _nesPlay = new() { AutoSize = true, Text = "Включить управление" };
     private readonly Label _nesStatus = new() { AutoSize = true, MaximumSize = new Size(660, 0) };
     private readonly Button[] _nesBindings = new Button[NesButtons.Length];
@@ -70,12 +71,13 @@ internal sealed partial class BrowserForm
             UpdateNesBindings();
             if (SaveSettings()) _nesStatus.Text = "Привязки сохранены.";
         };
-        actions.Controls.AddRange([_nesPlay, reset]);
+        actions.Controls.AddRange([_nesPlay, _nesReturn, reset]);
         rows.Controls.Add(actions, 0, NesButtons.Length);
         rows.SetColumnSpan(actions, 2);
         rows.Controls.Add(_nesStatus, 0, NesButtons.Length + 1);
         rows.SetColumnSpan(_nesStatus, 2);
 
+        _nesReturn.Click += async (_, _) => await ReturnToNesMenuAsync();
         _nesPlay.Click += (_, _) =>
         {
             if (_nesPlaying) StopNesInput();
@@ -101,6 +103,18 @@ internal sealed partial class BrowserForm
         Disposed += (_, _) => _nesTimer.Dispose();
         _nesTimer.Start();
         UpdateNesBindings();
+    }
+
+    private async Task ReturnToNesMenuAsync()
+    {
+        if (_client is not { SupportsNesMenu: true } client) return;
+        bool returned = await RunAsync(async () =>
+        {
+            await Task.Run(client.ReturnToNesMenu);
+            _nesPending.Clear();
+            _nesMask = 0;
+        }, keepNesInput: true);
+        if (returned) statusLabel.Text = _nesStatus.Text = "На плате открыт выбор режима.";
     }
 
     private static bool IsNesKey(Keys key) => key > Keys.XButton2 && key <= Keys.OemClear &&

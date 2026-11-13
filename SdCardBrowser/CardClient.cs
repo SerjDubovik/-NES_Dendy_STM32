@@ -42,6 +42,7 @@ internal sealed class CardClient : IDisposable
     private readonly SerialPort _port;
     private bool _supportsTransfer;
     public bool SupportsNesInput { get; private set; }
+    public bool SupportsNesMenu { get; private set; }
     private uint _nextId = (uint)Random.Shared.NextInt64(1, uint.MaxValue);
 
     private CardClient(string portName, int baudRate)
@@ -80,6 +81,7 @@ internal sealed class CardClient : IDisposable
                 int protocol = reply.TryGetProperty("version", out var version) ? version.GetInt32() : 0;
                 _supportsTransfer = protocol >= 2;
                 SupportsNesInput = protocol >= 4;
+                SupportsNesMenu = protocol >= 5;
             });
         }
         catch (FatFsException ex) when (nor && ex.Result is 6 or 19)
@@ -123,7 +125,23 @@ internal sealed class CardClient : IDisposable
         }
     }
 
-    public void SetNesInput(byte buttons) => Exchange("nespad", null, null, null, mask: buttons);
+    public void ReturnToNesMenu() => SendNesCommand("nesmenu");
+
+    public void SetNesInput(byte buttons) => SendNesCommand("nespad", buttons);
+
+    private void SendNesCommand(string operation, byte? mask = null)
+    {
+        try
+        {
+            Exchange(operation, null, null, null, mask: mask);
+        }
+        catch (CardLinkException ex) when (ex.InnerException is JsonException)
+        {
+            // Both commands set state, so repeating a command after a corrupt reply is safe.
+            _port.DiscardInBuffer();
+            Exchange(operation, null, null, null, mask: mask);
+        }
+    }
 
     public void Execute(string operation, string? path = null, string? destination = null) =>
         Exchange(operation, path, destination, null);
@@ -289,7 +307,7 @@ internal sealed class CardClient : IDisposable
         catch (TimeoutException ex)
         {
             throw new CardLinkException(
-                "Истекло время ожидания ответа платы. После подключения проверьте состояние файлов.", ex);
+                $"Нет ответа от платы на {_port.PortName} при {_port.BaudRate} бод. Проверьте скорость UART платы и подключение.", ex);
         }
         catch (Exception ex) when (ex is InvalidOperationException or JsonException or KeyNotFoundException or
             FormatException or UnauthorizedAccessException || ex is IOException and not (FatFsException or CardLinkException))

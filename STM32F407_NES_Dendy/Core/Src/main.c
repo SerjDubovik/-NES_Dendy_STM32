@@ -27,7 +27,7 @@
 #ifdef LCD_PLAYBACK_DIAGNOSTICS
 #include "lcd_playback_diagnostics.h"
 #else
-#include "nes_game.h"
+#include "nes_menu.h"
 #endif
 #include "sd_browser.h"
 /* USER CODE END Includes */
@@ -114,7 +114,7 @@ int main(void)
   SD_Browser_Init();
   ILI9341_Init();
 #ifndef LCD_PLAYBACK_DIAGNOSTICS
-  NesGame_Init();
+  NesMenu_Init();
 #endif
   /* USER CODE END 2 */
 
@@ -129,7 +129,7 @@ int main(void)
 #ifdef LCD_PLAYBACK_DIAGNOSTICS
     LcdPlaybackDiagnostics_Poll();
 #else
-    NesGame_Poll();
+    NesMenu_Poll();
 #endif
   }
   /* USER CODE END 3 */

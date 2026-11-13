@@ -75,3 +75,13 @@ C:\II\NES_Dendy_STM32\SdCardBrowser\obj\Debug\net10.0-windows\refint\SdCardBrows
 C:\II\NES_Dendy_STM32\SdCardBrowser\obj\Debug\net10.0-windows\SdCardBrowser.pdb
 C:\II\NES_Dendy_STM32\SdCardBrowser\obj\Debug\net10.0-windows\SdCardBrowser.genruntimeconfig.cache
 C:\II\NES_Dendy_STM32\SdCardBrowser\obj\Debug\net10.0-windows\ref\SdCardBrowser.dll
+C:\Users\Admin\AppData\Local\Temp\sdcard-menu-0908a063\SdCardBrowser.exe
+C:\Users\Admin\AppData\Local\Temp\sdcard-menu-0908a063\SdCardBrowser.deps.json
+C:\Users\Admin\AppData\Local\Temp\sdcard-menu-0908a063\SdCardBrowser.runtimeconfig.json
+C:\Users\Admin\AppData\Local\Temp\sdcard-menu-0908a063\SdCardBrowser.dll
+C:\Users\Admin\AppData\Local\Temp\sdcard-menu-0908a063\SdCardBrowser.pdb
+C:\Users\Admin\AppData\Local\Temp\SdCardBrowser-menu-d2dd70df\SdCardBrowser.exe
+C:\Users\Admin\AppData\Local\Temp\SdCardBrowser-menu-d2dd70df\SdCardBrowser.deps.json
+C:\Users\Admin\AppData\Local\Temp\SdCardBrowser-menu-d2dd70df\SdCardBrowser.runtimeconfig.json
+C:\Users\Admin\AppData\Local\Temp\SdCardBrowser-menu-d2dd70df\SdCardBrowser.dll
+C:\Users\Admin\AppData\Local\Temp\SdCardBrowser-menu-d2dd70df\SdCardBrowser.pdb

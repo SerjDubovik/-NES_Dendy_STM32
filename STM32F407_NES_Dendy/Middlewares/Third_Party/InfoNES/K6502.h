@@ -10,6 +10,8 @@
 #ifndef K6502_H_INCLUDED
 #define K6502_H_INCLUDED
 
+#include <stdint.h>
+
 // Type definition
 #ifndef DWORD
 typedef unsigned long  DWORD;
@@ -65,5 +67,6 @@ extern BYTE NMI_State;
 
 // The number of the clocks that it passed
 extern WORD g_wPassedClocks;
+extern uint32_t K6502_CycleBase;
 
 #endif /* !K6502_H_INCLUDED */

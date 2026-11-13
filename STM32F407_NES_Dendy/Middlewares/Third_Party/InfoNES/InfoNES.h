@@ -82,6 +82,7 @@ extern BYTE PPU_R1;
 extern BYTE PPU_R2;
 extern BYTE PPU_R3;
 extern BYTE PPU_R7;
+extern BYTE PPU_OpenBus;
 
 extern BYTE PPU_FineX;
 extern WORD PPU_Addr;
@@ -222,6 +223,19 @@ extern BYTE ROM_Mirroring;
 extern BYTE ROM_SRAM;
 extern BYTE ROM_Trainer;
 extern BYTE ROM_FourScr;
+#if defined(INFONES_MMC1) || defined(INFONES_MMC3)
+extern WORD PrgRamMask;
+extern bool PrgRamRead;
+extern bool PrgRamWrite;
+#endif
+#ifdef INFONES_MMC3
+extern bool MapperIrqPending;
+void InfoNES_Mmc3A12(WORD address, uint32_t cpuCycle);
+void InfoNES_Mmc3Scanline(bool preRender);
+#endif
+#if defined(INFONES_AXROM) || defined(INFONES_MMC1) || defined(INFONES_MMC3)
+BYTE InfoNES_ReadMappedPrg(WORD address);
+#endif
 
 /*-------------------------------------------------------------------*/
 /*  Function prototypes                                              */

@@ -185,42 +185,68 @@ target_link_options(${CMAKE_PROJECT_NAME} PRIVATE
 )
 
 if(NOT LCD_PLAYBACK_DIAGNOSTICS)
+    set(lvgl_dir "${CMAKE_CURRENT_SOURCE_DIR}/Middlewares/Third_Party/lvgl")
+    file(GLOB_RECURSE lvgl_sources CONFIGURE_DEPENDS "${lvgl_dir}/src/*.c")
+    add_library(nes_lvgl STATIC ${lvgl_sources})
+    target_include_directories(nes_lvgl PUBLIC "${lvgl_dir}" PRIVATE Core/Inc)
+    target_compile_definitions(nes_lvgl PRIVATE LV_CONF_INCLUDE_SIMPLE STM32F407xx)
+    target_compile_options(nes_lvgl PRIVATE ${cpu_PARAMS} -Os)
+    target_link_libraries(nes_lvgl PRIVATE hal_stm32f4xx cmsis_stm32f4xx)
+    target_link_libraries(${CMAKE_PROJECT_NAME} nes_lvgl)
+    target_compile_definitions(${CMAKE_PROJECT_NAME} PRIVATE LV_CONF_INCLUDE_SIMPLE)
+
     set(nes_module_dir "${CMAKE_CURRENT_SOURCE_DIR}/Middlewares/Third_Party/InfoNES")
     set(nes_module_linker "${CMAKE_CURRENT_SOURCE_DIR}/cmake/nes_module.ld")
     set(nes_module_packer "${CMAKE_CURRENT_SOURCE_DIR}/cmake/pack_nes_module.ps1")
-    set(nes_module_image "${CMAKE_CURRENT_BINARY_DIR}/NES/InfoNES.bin")
-
-    add_executable(InfoNES_module
-        "${nes_module_dir}/InfoNES.cpp"
-        "${nes_module_dir}/InfoNES_Mapper.cpp"
-        "${nes_module_dir}/InfoNES_STM32.cpp"
-        "${nes_module_dir}/K6502.cpp"
-    )
-    target_include_directories(InfoNES_module PRIVATE Core/Inc)
-    target_compile_options(InfoNES_module PRIVATE
-        ${cpu_PARAMS}
-        -O2 -ffreestanding -fno-unwind-tables -fno-asynchronous-unwind-tables
-    )
-    target_link_options(InfoNES_module PRIVATE
-        ${cpu_PARAMS}
-        -T${nes_module_linker}
-        -nostartfiles -nodefaultlibs
-        -Wl,-Map=${CMAKE_CURRENT_BINARY_DIR}/InfoNES_module.map
-    )
-    target_link_libraries(InfoNES_module PRIVATE c gcc)
-    set_property(TARGET InfoNES_module APPEND PROPERTY LINK_DEPENDS "${nes_module_linker}")
-
     find_program(nes_powershell NAMES powershell pwsh REQUIRED)
-    add_custom_command(OUTPUT "${nes_module_image}"
-        COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_CURRENT_BINARY_DIR}/NES"
-        COMMAND ${CMAKE_OBJCOPY} -O binary --gap-fill=0 $<TARGET_FILE:InfoNES_module>
-            "${CMAKE_CURRENT_BINARY_DIR}/InfoNES.raw.bin"
-        COMMAND "${nes_powershell}" -NoProfile -NonInteractive -ExecutionPolicy Bypass
-            -File "${nes_module_packer}" "${CMAKE_CURRENT_BINARY_DIR}/InfoNES.raw.bin" "${nes_module_image}"
-        DEPENDS InfoNES_module "${nes_module_packer}"
-        VERBATIM
-    )
-    add_custom_target(NES_Module_Image DEPENDS "${nes_module_image}")
+    function(add_nes_module target name abi)
+        set(nes_module_image "${CMAKE_CURRENT_BINARY_DIR}/NES/${name}.bin")
+        add_executable(${target}
+            "${nes_module_dir}/InfoNES.cpp"
+            "${nes_module_dir}/InfoNES_Mapper.cpp"
+            "${nes_module_dir}/InfoNES_STM32.cpp"
+            "${nes_module_dir}/K6502.cpp"
+        )
+        target_include_directories(${target} PRIVATE Core/Inc)
+        target_compile_options(${target} PRIVATE
+            ${cpu_PARAMS}
+            -O2 -ffreestanding -fno-unwind-tables -fno-asynchronous-unwind-tables
+        )
+        target_link_options(${target} PRIVATE
+            ${cpu_PARAMS}
+            -T${nes_module_linker}
+            -nostartfiles -nodefaultlibs
+            -Wl,-Map=${CMAKE_CURRENT_BINARY_DIR}/${target}.map
+        )
+        target_link_libraries(${target} PRIVATE c gcc)
+        set_property(TARGET ${target} APPEND PROPERTY LINK_DEPENDS "${nes_module_linker}")
+
+        target_compile_definitions(${target} PRIVATE ${ARGN})
+        target_link_options(${target} PRIVATE -Wl,--defsym=__nes_module_abi=${abi})
+        add_custom_command(OUTPUT "${nes_module_image}"
+            COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_CURRENT_BINARY_DIR}/NES"
+            COMMAND ${CMAKE_OBJCOPY} -O binary --gap-fill=0 $<TARGET_FILE:${target}>
+                "${CMAKE_CURRENT_BINARY_DIR}/${target}.raw.bin"
+            COMMAND "${nes_powershell}" -NoProfile -NonInteractive -ExecutionPolicy Bypass
+                -File "${nes_module_packer}" "${CMAKE_CURRENT_BINARY_DIR}/${target}.raw.bin" "${nes_module_image}"
+            DEPENDS ${target} "${nes_module_packer}"
+            VERBATIM
+        )
+    endfunction()
+
+    add_nes_module(InfoNES_module InfoNES 1)
+    add_nes_module(InfoNES_UxROM_module InfoNES-UxROM 2 INFONES_UXROM)
+    add_nes_module(InfoNES_AxROM_module InfoNES-AxROM 7 INFONES_AXROM)
+    add_nes_module(InfoNES_MMC1_module InfoNES-MMC1 4 INFONES_MMC1)
+    add_nes_module(InfoNES_CNROM_module InfoNES-CNROM 5 INFONES_CNROM)
+    add_nes_module(InfoNES_MMC3_module InfoNES-MMC3 6 INFONES_MMC3)
+    add_custom_target(NES_Module_Image DEPENDS
+        "${CMAKE_CURRENT_BINARY_DIR}/NES/InfoNES.bin"
+        "${CMAKE_CURRENT_BINARY_DIR}/NES/InfoNES-UxROM.bin"
+        "${CMAKE_CURRENT_BINARY_DIR}/NES/InfoNES-AxROM.bin"
+        "${CMAKE_CURRENT_BINARY_DIR}/NES/InfoNES-MMC1.bin"
+        "${CMAKE_CURRENT_BINARY_DIR}/NES/InfoNES-CNROM.bin"
+        "${CMAKE_CURRENT_BINARY_DIR}/NES/InfoNES-MMC3.bin")
     add_dependencies(${CMAKE_PROJECT_NAME} NES_Module_Image)
 endif()
 

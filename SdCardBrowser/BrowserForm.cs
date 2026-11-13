@@ -149,6 +149,7 @@ internal sealed partial class BrowserForm : Form, IMessageFilter
         uploadButton.Enabled = ready;
         downloadButton.Enabled = ready && Selected is { IsDirectory: false };
         cancelButton.Enabled = _transfer is not null;
+        _nesReturn.Enabled = ready && _client is { SupportsNesMenu: true };
         _nesPlay.Enabled = _nesPlaying || (ready && _client is { SupportsNesInput: true });
         _nesPlay.Text = _client switch
         {
@@ -159,7 +160,7 @@ internal sealed partial class BrowserForm : Form, IMessageFilter
         UseWaitCursor = _busy && _transfer is null;
     }
 
-    private async Task<bool> RunAsync(Func<Task> action, Form? errorOwner = null)
+    private async Task<bool> RunAsync(Func<Task> action, Form? errorOwner = null, bool keepNesInput = false)
     {
         if (_busy) return false;
         _busy = true;
@@ -167,7 +168,7 @@ internal sealed partial class BrowserForm : Form, IMessageFilter
         UpdateControls();
         try
         {
-            StopNesInput();
+            if (!keepNesInput) StopNesInput();
             if (_nesExchange is { } sending) await sending;
             await action();
             return true;
